@@ -40,7 +40,7 @@ fn main() {
 fn copy(start: Instant,
         input: &mut Read,
         output: &mut Write) {
-    let mut input = BufReader::new(input);
+    let input = BufReader::new(input);
     let mut output = BufWriter::new(output);
     for line in input.lines() {
         let dur = start.elapsed().as_secs();
