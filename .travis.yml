@@ -1,0 +1,53 @@
+language: rust
+sudo: false
+rust: stable
+dist: trusty
+
+matrix:
+  include:
+    - rust: nightly
+    - env: TARGET=x86_64-unknown-linux-musl DEPLOY=1
+      before_script:
+        - rustup target add $TARGET
+        - curl https://www.openssl.org/source/openssl-1.0.2k.tar.gz | tar xzf -
+        - (cd openssl-1.0.2k &&
+          CC=musl-gcc ./Configure --prefix=$HOME/openssl-musl no-dso no-ssl2 no-ssl3 linux-x86_64 -fPIC &&
+          make -j$(nproc) &&
+          make install)
+        - export OPENSSL_DIR=$HOME/openssl-musl
+      script: cargo build --release --target $TARGET --locked
+
+    - os: osx
+    - os: osx
+      env: MACOSX_DEPLOYMENT_TARGET=10.7 DEPLOY=1 TARGET=x86_64-apple-darwin OPENSSL_STATIC=1
+      script: cargo build --release --target $TARGET --locked
+
+addons:
+  apt:
+    packages:
+    - musl-tools
+
+script:
+  - cargo test --locked
+
+notifications:
+  email:
+    on_success: never
+
+before_deploy:
+  - name="stamp-$TRAVIS_TAG-$TARGET"
+  - mkdir $name
+  - cp target/$TARGET/release/stamp $name/
+  - cp README.md LICENSE-MIT LICENSE-APACHE $name/
+  - tar czvf $name.tar.gz $name
+
+deploy:
+  api_key:
+    secure: "Qh7T0ozgn0B6P9lqDIX9+qWVwfXbDVBKerO10LG6ns55TyyUdrpl/BYABjNnCcON65DAsnJa7MZ/uXPYnG+5rALc2zrdL05XVKGgz7y19AzDv9WDpVIy5YrY7F9XNKhMfhIe8qiJQZx0PoCK/1x8tAyYZUI+ELCRlu4UxWFoLydILydqyZypAp2glY8jzm62dO8TRxTqDtiGtEGb4JGtUjG7ifyMZTBkeFn10zBCbnpZ0eOcwXOrMIXeziBnm/UM+p1I6Zw+PYl+AKlMF1OjLYIw7yZDb5l3W9Sn2gvUecxLLvcKdOh3gn+q6A2CSIPcoGh+KFZqsNRUf2Kaa5AN92L1yGRVjUWNN/N9zxCAv0llfcO9ls0EMa5Be48LcxW/nfJ1uZwXSeTLBKvyUbBVqAOjGrrT1IrYTp1WIzz4yAAMQRr4/Q/ea0NEDR0Iwd8FP72vzlH4Uvuy9bG3BdIuvaBiZeM0WspSsNg2NJFHfKOncvSuo/gI7virnd4midPrdMeMSoBGx+0yp5Ih/c/hOJ3xhoNIa/lHIo6m761/08dHM3zqiQ+7qRDR/qQUTIyta600fI1QqwgisbMKzBFPLGurjCNiUxjiDwBVixGntH0DrepTJjWgKcP5jqUD0jZjjDNwl4NOJMvqDdmCdOK881bndC3zg2vy0ys05GMM34M="
+  file_glob: true
+  file: stamp-$TRAVIS_TAG-$TARGET.tar.gz
+  on:
+    condition: $DEPLOY = 1
+    tags: true
+  provider: releases
+  skip_cleanup: true
