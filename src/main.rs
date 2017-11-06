@@ -1,6 +1,6 @@
 use std::env;
 use std::io::prelude::*;
-use std::io::{self, BufReader, BufWriter};
+use std::io;
 use std::process::{self, Command, Stdio};
 use std::thread;
 use std::time::Instant;
@@ -23,8 +23,8 @@ fn main() {
     let mut child = cmd.spawn().expect("failed to spawn child process");
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
-    let t = thread::spawn(move || copy(start, &mut stdout, &mut io::stdout()));
-    copy(start, &mut stderr, &mut io::stderr());
+    let t = thread::spawn(move || copy(start, &mut stderr, &mut io::stderr()));
+    copy(start, &mut stdout, &mut io::stdout());
     t.join().unwrap();
 
 
@@ -37,32 +37,52 @@ fn main() {
     }
 }
 
-fn copy(start: Instant,
-        input: &mut Read,
-        output: &mut Write) {
-    let input = BufReader::new(input);
-    let mut output = BufWriter::new(output);
-    for line in input.lines() {
-        let dur = start.elapsed().as_secs();
+fn copy(start: Instant, input: &mut Read, output: &mut Write) {
+    match do_copy(&start, input, output) {
+        Ok(()) => {}
+        Err(err) => {
+            drop(write!(output, "failed to read/write stream: {}\n", err).and_then(|()| {
+                output.flush()
+            }));
+            process::exit(23);
+        }
+    }
+}
 
-        let result = line.and_then(|line| {
-            write!(output,
-                   "[{:02}:{:02}:{:02}] {}\n",
-                   dur / 3600,
-                   (dur % 3600) / 60,
-                   dur % 60,
-                   line)
-        }).and_then(|()| {
-            output.flush()
-        });
+fn do_copy(start: &Instant,
+           input: &mut Read,
+           output: &mut Write) -> io::Result<()> {
+    let mut buf = [0; 1024];
+    let mut saw_newline = true;
+    loop {
+        let n = input.read(&mut buf)?;
+        if n == 0 {
+            return Ok(())
+        }
 
-        let err = match result {
-            Ok(()) => continue,
-            Err(e) => e,
-        };
-        drop(write!(output, "failed to read stream: {}\n", err).and_then(|()| {
-            output.flush()
-        }));
-        process::exit(23);
+        let mut buf = &buf[..n];
+        while buf.len() > 0 {
+            if saw_newline {
+                let dur = start.elapsed().as_secs();
+                write!(output,
+                       "[{:02}:{:02}:{:02}] ",
+                       dur / 3600,
+                       (dur % 3600) / 60,
+                       dur % 60)?;
+                saw_newline = false;
+            }
+            match buf.iter().position(|b| *b == b'\n') {
+                Some(i) => {
+                    output.write_all(&buf[..i + 1])?;
+                    buf = &buf[i + 1..];
+                    saw_newline = true;
+                }
+                None => {
+                    output.write_all(buf)?;
+                    break
+                }
+            }
+        }
+        output.flush()?;
     }
 }
